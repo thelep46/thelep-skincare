@@ -1,0 +1,4 @@
+export function parseNominal(value){ if(typeof value==='number') return Number.isFinite(value)?value:0; if(value==null) return 0; let text=String(value).trim(); if(!text) return 0; text=text.replace(/[^0-9,.-]/g,''); if(text.includes(',') && text.lastIndexOf(',')>text.lastIndexOf('.')) text=text.replace(/\./g,'').replace(',','.'); else text=text.replace(/\./g,'').replace(',','.'); const n=Number(text); return Number.isFinite(n)?Math.round(n):0; }
+export const normalizeAmount=parseNominal;
+export function formatRupiah(value){ return new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(parseNominal(value)); }
+export function formatDate(value){ return value ? new Date(value).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}) : '-'; }
