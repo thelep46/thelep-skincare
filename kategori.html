@@ -1,1 +1,166 @@
-<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kategori • THELEP FINANCE</title><link rel="stylesheet" href="assets/css/app.css"></head><body data-page="kategori"><div class="layout"><aside class="sidebar" id="sidebar"><div class="brand">THELEP <span>FINANCE</span></div><div class="tag">Smart Finance Dashboard</div><nav class="nav"><a href="dashboard-unified.html">Dashboard</a><a href="transaksi.html">Transaksi</a><a href="saldo-akun.html">Saldo Akun</a><a href="kas-bank.html">Kas & Bank</a><a href="hutang.html">Hutang</a><a href="piutang.html">Piutang</a><a href="jurnal.html">Jurnal</a><a href="akun.html">Akun</a><a href="entitas.html">Entitas</a><a href="kategori.html">Kategori</a><a href="metode-pembayaran.html">Metode Pembayaran</a><a href="pengaturan.html">Pengaturan</a></nav></aside><main class="main"><header class="topbar"><button class="btn secondary menu-btn" id="menuBtn">☰</button><h1>Kategori</h1><div class="actions"><button class="btn secondary" id="refreshBtn">Refresh Data</button></div></header><section class="content"><div id="masterRoot"></div></section></main></div><div class="toast-stack" id="toast"></div><script type="module" src="assets/js/app.js"></script></body></html>
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Kategori • THELEP FINANCE</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:20px}
+    .loading{color:#666}
+    .error{color:#a00}
+    .grid{display:flex;flex-wrap:wrap;gap:12px}
+    .card{padding:12px;border:1px solid #eee;border-radius:8px;min-width:150px}
+  </style>
+</head>
+<body>
+  <h1>Kategori</h1>
+  <p id="status" class="loading">Memuat master data...</p>
+  <div id="content" class="grid" aria-live="polite"></div>
+
+  <script>
+  // === PENTING ===
+  // Konfigurasi: masukkan SPREADSHEET_ID dan (jika Anda belum punya server proxy) API_KEY.
+  // Namun: menaruh API_KEY di kode klien berarti setiap pengunjung menggunakan kuota proyek yang sama.
+  // Lebih baik: buat endpoint serverless yang mem-fetch Sheets dan melakukan caching.
+  const SPREADSHEET_ID = 'GANTI_SPREADSHEET_ID';
+  const API_KEY = 'GANTI_API_KEY'; // optional if you use server proxy
+
+  // Cache config
+  const CACHE_KEY = 'master_data_v2';
+  const CACHE_TTL = 60 * 1000; // 60s
+
+  // Range yang ingin dibaca. Gabungkan menjadi satu batchGet untuk mengurangi banyak read requests.
+  const RANGES = ['Sheet1!A1:E200'];
+
+  // Simple exponential backoff with jitter for transient 429/503 errors
+  async function fetchWithBackoff(url, options = {}, retries = 5) {
+    let delay = 500;
+    for (let i = 0; i <= retries; i++) {
+      try {
+        const res = await fetch(url, options);
+        if (res.status === 429 || res.status === 503) throw { transient: true, res };
+        if (!res.ok) throw { transient: false, res };
+        return await res.json();
+      } catch (err) {
+        if (i === retries || !err.transient) throw err;
+        await new Promise(r => setTimeout(r, delay + Math.random() * 200));
+        delay *= 2;
+      }
+    }
+  }
+
+  function readCache() {
+    try {
+      const raw = localStorage.getItem(CACHE_KEY);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (Date.now() - obj.ts < CACHE_TTL) return obj.data;
+      return null;
+    } catch (e) { return null; }
+  }
+  function writeCache(data) {
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data })); } catch (e) {}
+  }
+
+  // Debounce to prevent multiple simultaneous loads (e.g., multiple UI events)
+  let loadInProgress = null;
+  async function getMasterData() {
+    if (loadInProgress) return loadInProgress;
+    const cached = readCache();
+    if (cached) return Promise.resolve(cached);
+
+    loadInProgress = (async () => {
+      // If you have a server proxy, replace the URL below with your endpoint and remove API_KEY usage.
+      const base = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(SPREADSHEET_ID)}/values:batchGet`;
+      const params = RANGES.map(r => `ranges=${encodeURIComponent(r)}`).join('&');
+      const url = `${base}?${params}&key=${encodeURIComponent(API_KEY)}`;
+      try {
+        const payload = await fetchWithBackoff(url, {}, 4);
+        // payload.valueRanges is an array matching RANGES order
+        writeCache(payload.valueRanges);
+        return payload.valueRanges;
+      } catch (err) {
+        // On error, try to use stale cache if available (longer TTL fallback)
+        const stale = (function(){
+          try{
+            const raw = localStorage.getItem(CACHE_KEY);
+            if(!raw) return null;
+            const obj = JSON.parse(raw);
+            // allow stale up to 24 hours if network fails
+            if (Date.now() - obj.ts < 24 * 3600 * 1000) return obj.data;
+            return null;
+          }catch(e){return null}
+        })();
+        if (stale) return stale;
+        throw err;
+      } finally {
+        loadInProgress = null;
+      }
+    })();
+    return loadInProgress;
+  }
+
+  // Render functions
+  const statusEl = document.getElementById('status');
+  const contentEl = document.getElementById('content');
+
+  function renderEmpty(message){
+    statusEl.textContent = message;
+    statusEl.className = 'error';
+    contentEl.innerHTML = '';
+  }
+
+  function renderData(valueRanges) {
+    statusEl.textContent = 'Data dimuat.';
+    statusEl.className = '';
+    contentEl.innerHTML = '';
+    // For simple sheet with headers in first row
+    const rows = (valueRanges && valueRanges[0] && valueRanges[0].values) || [];
+    if (rows.length <= 1) { renderEmpty('Tidak ada data.'); return; }
+    const headers = rows[0];
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const name = row[0] || '(kosong)';
+      const desc = row[1] || '';
+      const el = document.createElement('div');
+      el.className = 'card';
+      el.innerHTML = `<strong>${escapeHtml(name)}</strong><div>${escapeHtml(desc)}</div>`;
+      contentEl.appendChild(el);
+    }
+  }
+
+  function escapeHtml(s){
+    return String(s)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#39;');
+  }
+
+  async function init() {
+    if (SPREADSHEET_ID === 'GANTI_SPREADSHEET_ID' || API_KEY === 'GANTI_API_KEY') {
+      statusEl.textContent = 'Konfigurasi: silakan atur SPREADSHEET_ID dan API_KEY di file ini (atau gunakan server proxy).';
+      statusEl.className = 'error';
+      // show sample fallback so UI isn't empty
+      contentEl.innerHTML = '<div class="card"><strong>Sample Kategori</strong><div>Produk contoh</div></div>';
+      return;
+    }
+
+    statusEl.textContent = 'Memuat master data...';
+    statusEl.className = 'loading';
+    try {
+      const data = await getMasterData();
+      renderData(data);
+    } catch (err) {
+      console.error('Gagal memuat master data', err);
+      renderEmpty('Gagal memuat data. Silakan coba lagi nanti.');
+    }
+  }
+
+  // kick off
+  document.addEventListener('DOMContentLoaded', init);
+  </script>
+
+</body>
+</html>
